@@ -1,0 +1,2 @@
+{ "name": "Hydro Garden", "short_name": "Garden", "start_url": ".", "display": "standalone", "background_color": "#eef2ee", "theme_color": "#eef2ee",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }] }
