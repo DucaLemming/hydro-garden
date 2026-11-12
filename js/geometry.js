@@ -34,10 +34,10 @@ export function mark(s, h) {
   const aboveMin = round(h - g.min, 1);
   const frac = clamp((h - g.min) / g.span, 0, 1);
   let text;
-  if (h >= g.max - 0.75) text = 'at the MAX mark';
-  else if (h <= g.min + 0.75) text = 'at the MIN mark';
+  if (h >= g.max - 0.75) text = 'the MAX mark';
+  else if (h <= g.min + 0.75) text = 'the MIN mark';
   else text = `${round(aboveMin)} mm above the MIN mark (about ${frac < 0.38 ? 'one third' : frac < 0.62 ? 'halfway' : 'two thirds'} up the scale)`;
-  return { h: round(h, 1), aboveMin, frac, text };
+  return { h: round(h, 1), aboveMin, frac, text, at: /^the M/.test(text) ? `at ${text}` : text };
 }
 
 // Layer stack inside one basket for a given plant.

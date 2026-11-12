@@ -25,7 +25,7 @@ The steps are in the app under Settings, Google Calendar. In short: create a Goo
 
 ## Data
 
-Everything is stored in the browser's localStorage. Settings has a transfer link and a backup file for moving the garden between devices.
+Everything is stored in the browser's localStorage. With a fine-grained GitHub token (Contents: read and write on this repo only) entered in Settings, every change is also saved to `garden.json` on the `garden-data` branch and loaded by every other device that has the token. The token stays in the browser. That branch is separate from `main`, so saving does not redeploy the site. Without a token, Settings has a transfer link and a backup file.
 
 ## Where the numbers come from
 

@@ -71,3 +71,23 @@ import { sync } from '../js/gcal.js';
   assert.equal(db.size, items.length - 2);
   console.log('SYNC TESTS PASSED');
 }
+
+// --- GitHub sync against a fake API
+import { reconcile, repoFromLocation } from '../js/ghsync.js';
+{
+  let file = { sha: 's0', content: Buffer.from('{"updatedAt":0}').toString('base64') }, n = 0;
+  const fake = async (url, o) => {
+    if (o.method === 'GET') return { ok: true, status: 200, json: async () => file };
+    const b = JSON.parse(o.body);
+    if (b.sha !== file.sha) return { ok: false, status: 409, json: async () => ({ message: 'conflict' }) };
+    file = { sha: `s${++n}`, content: b.content };
+    return { ok: true, status: 200, json: async () => ({ content: { sha: file.sha } }) };
+  };
+  const base = { token: 't', repo: 'a/b', fetchFn: fake };
+  assert.equal((await reconcile({ ...base, local: { updatedAt: 0 } })).action, 'same');
+  const a = await reconcile({ ...base, local: { updatedAt: 5, x: 'Räm' } }); assert.equal(a.action, 'pushed');
+  const b = await reconcile({ ...base, local: { updatedAt: 0 } }); assert.equal(b.action, 'pulled'); assert.equal(b.state.x, 'Räm');
+  assert.equal((await reconcile({ ...base, local: { updatedAt: 5 } })).action, 'same');
+  assert.equal(repoFromLocation({ hostname: 'ducalemming.github.io', pathname: '/hydro-garden/' }), 'ducalemming/hydro-garden');
+  console.log('GITHUB SYNC TESTS PASSED');
+}

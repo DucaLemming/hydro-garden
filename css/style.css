@@ -184,3 +184,11 @@ details.dates { border: 1px solid var(--line); border-radius: 8px; padding: .6re
 
 .task-how summary { font: 600 .88rem var(--head); color: var(--leaf); cursor: pointer; display: inline-block; padding: .2rem 0; min-height: 28px; }
 .task-how[open] summary { margin-bottom: .1rem; }
+
+.ghdot { width: 9px; height: 9px; border-radius: 50%; margin-left: auto; background: #b9c5bc; flex: none; }
+.ghdot.ok { background: #2f8f4e; } .ghdot.bad { background: var(--danger); }
+@media (max-width: 899px) { .nav a { position: relative; } .ghdot { position: absolute; top: 4px; right: 8px; } }
+.ghstat { font-weight: 600; margin: .7rem 0 0; } .ghstat.bad { color: var(--danger); }
+.guide-harvest { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+.guide-harvest .harvest { grid-template-columns: 72px 1fr; align-items: start; } .guide-harvest .cutg { width: 72px; }
+.guide-harvest h3 { margin: 0 0 .2rem; } .guide-harvest p { font-size: .93rem; margin: 0; }

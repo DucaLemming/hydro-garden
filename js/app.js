@@ -7,13 +7,47 @@ import { sync } from './gcal.js';
 import { crossSection, gauge, cutGlyph } from './diagrams.js';
 import { today, addDays, diffDays, fmt, fmtLong, round, esc } from './util.js';
 import { viewGuide } from './guide.js';
+import { loadCfg, saveCfg, reconcile, pull, repoFromLocation, BRANCH } from './ghsync.js';
 
 let state = load();
 const ui = { sheet: null, cats: new Set(), showDone: false, q: '', sync: null, litres: '', sowDay: today(), open: {} };
 const $ = sel => document.querySelector(sel);
 const plants = () => plantMap(state.custom);
 const sched = () => buildSchedule(state, plants(), today());
-const commit = () => { save(state); render(); };
+const persist = () => { state.updatedAt = Date.now(); save(state); schedulePush(); };
+const commit = () => { persist(); render(); };
+
+// ---------- saving to GitHub so all devices agree ----------
+const gh = { cfg: loadCfg(), repo: repoFromLocation(location), status: '', error: '', busy: false, timer: null, at: null };
+const ghLine = () => (!gh.cfg.token ? 'Not connected. This device keeps its own copy.' : gh.error ? gh.error : gh.busy ? 'Saving to GitHub...' : gh.at ? `In sync with GitHub since ${gh.at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.` : 'Connected.');
+function paintGh() {
+  document.querySelectorAll('[data-gh]').forEach(el => { el.textContent = ghLine(); el.classList.toggle('bad', !!gh.error); });
+  const dot = $('.nav .ghdot'); if (dot) dot.className = `ghdot ${!gh.cfg.token ? 'off' : gh.error ? 'bad' : 'ok'}`;
+  const ban = $('#gh-banner'); if (ban) { ban.hidden = !gh.error; ban.textContent = gh.error ? `Not saved to GitHub: ${gh.error}` : ''; }
+}
+function schedulePush() { if (!gh.cfg.token) return; clearTimeout(gh.timer); gh.timer = setTimeout(syncNow, 1500); }
+async function syncNow() {
+  if (!gh.cfg.token || gh.busy) return;
+  gh.busy = true; paintGh();
+  try {
+    const r = await reconcile({ token: gh.cfg.token, repo: gh.repo, local: state });
+    gh.cfg.sha = r.sha; saveCfg(gh.cfg); gh.error = ''; gh.at = new Date();
+    if (r.action === 'pulled') { state = normalise(r.state); save(state); gh.busy = false; return render(); }
+  } catch (e) { gh.error = e.message; }
+  gh.busy = false; paintGh();
+}
+async function connectGh() {
+  gh.error = ''; gh.busy = true; paintGh();
+  try {
+    const remote = await pull({ token: gh.cfg.token, repo: gh.repo });
+    const has = remote.state && remote.state.updatedAt > 0;
+    if (has && confirm(`GitHub already holds a saved garden from ${new Date(remote.state.updatedAt).toLocaleString('en-GB')}. Use it on this device? Choose Cancel to keep this device's garden and overwrite the saved one.`)) { state = normalise(remote.state); save(state); }
+    else { state.updatedAt = Date.now(); save(state); }
+    gh.busy = false; await syncNow(); render();
+  } catch (e) { gh.busy = false; gh.error = e.message; render(); }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncNow(); });
+setInterval(() => { if (!document.hidden) syncNow(); }, 60000);
 
 // ---------- inputs with built-in explanations ----------
 // Every field carries a help text that says what to enter and in which unit.
@@ -80,7 +114,7 @@ function waterCard(sc) {
         <p class="lead">${mode === 'germ' ? 'Seeds are sprouting: keep the plugs in contact with the water.' : 'Roots are down: keep an air gap under the plugs.'}</p>
         <ul class="plain">
           <li><strong>Fill to</strong> ${w.fill.text} (${w.fill.h} mm above the tank floor).</li>
-          <li><strong>Top up when</strong> the level is ${w.low.text}.</li>
+          <li><strong>Top up when</strong> the level is ${w.low.at}.</li>
           <li><strong>Fertilizer:</strong> ${doseText(s, strength)}</li>
         </ul>
       </div></div>
@@ -316,9 +350,24 @@ function viewSettings() {
     </ol>
     ${field({ id: 'gcid', label: 'Google client ID', type: 'text', path: 'settings.gcalClientId', value: s.gcalClientId, placeholder: '1234567890-abc.apps.googleusercontent.com', help: 'The OAuth client ID from step 5. It is not a password and can safely be stored here. Paste it on each device you use.' })}
     <p class="note">Then press "Sync with Google Calendar" on the <a href="#/plan">Plan</a> page. Google shows a notice that the app is unverified because you made it yourself: choose Continue.</p>
+    <p class="note"><strong>"Error 403: access_denied" in the Google window?</strong> The app is in testing mode and the Google account you picked is not on its tester list. In the Google Cloud console open Google Auth Platform, Audience, and under "Test users" add the exact Google address you sign in with. Or press "Publish app" there, which lets any account through after the unverified-app notice.</p>
   </section>
-  <section class="card"><h2>Use it on another device</h2>
-    <p>Your garden is stored in this browser only. To carry it to your phone or back, open a transfer link on the other device, or move a backup file.</p>
+  <section class="card" id="ghsync"><h2>Save to GitHub and sync all devices</h2>
+    <p>With a GitHub access token, every change is saved to the file <code>garden.json</code> on the <code>${BRANCH}</code> branch of <code>${esc(gh.repo)}</code> within a couple of seconds, and every device with the token loads the newest version when you open it. Slots, dates, ticked tasks and all settings are included.</p>
+    <ol class="steps">
+      <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com, Settings, Developer settings, Fine-grained tokens, Generate new token</a>.</li>
+      <li>Name it "Hydro Garden". Choose an expiry (the app tells you when the token stops working).</li>
+      <li>Repository access: "Only select repositories", then pick <strong>${esc(gh.repo.split('/')[1])}</strong>.</li>
+      <li>Permissions, Repository permissions: set <strong>Contents</strong> to "Read and write". Nothing else.</li>
+      <li>Generate the token, copy it and paste it below. Do this once on each device.</li>
+    </ol>
+    ${field({ id: 'gh-token', label: 'GitHub access token', type: 'password', path: 'gh.token', value: gh.cfg.token, placeholder: 'github_pat_...', help: 'The fine-grained token from step 5, starting with github_pat_. It is stored only in this browser and is never saved to GitHub or put into transfer links. Clear the field to stop syncing on this device.' })}
+    <p class="ghstat" data-gh>${esc(ghLine())}</p>
+    <div class="row"><button class="btn" data-action="gh-now" ${gh.cfg.token ? '' : 'disabled'}>Sync now</button></div>
+    <p class="note">The repository is public, so the saved garden file can be read by anyone who looks for it. It holds plants, dates and settings, no personal data. If two devices change things within the same few seconds, the later change wins.</p>
+  </section>
+  <section class="card"><h2>Move data by hand</h2>
+    <p>Without a token, each browser keeps its own copy. A transfer link or a backup file carries it across.</p>
     <div class="row"><button class="btn" data-action="share">Copy transfer link</button><button class="btn" data-action="export">Download backup file</button>
       <label class="btn">Load backup file<input type="file" accept="application/json,.json" data-action="import" hidden></label></div>
     ${ui.msg ? `<p class="okmsg">${esc(ui.msg)}</p>` : ''}
@@ -359,9 +408,10 @@ function render() {
   const active = document.activeElement?.id;
   const body = view === 'tray' ? viewTray() : view === 'plan' ? viewPlan() : view === 'plants' ? viewPlants(arg) : view === 'guide' ? viewGuide(state, plants(), field) : view === 'settings' ? viewSettings() : viewToday();
   const cur = NAV.some(n => n[0] === view) ? view : 'today';
-  $('#app').innerHTML = `<nav class="nav" aria-label="Main"><a class="brand" href="#/today">Hydro Garden</a>${NAV.map(([k, l, d]) => `<a href="#/${k}" class="${k === cur ? 'on' : ''}" ${k === cur ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span></a>`).join('')}</nav>
-  <main id="main" class="view-${cur}">${body}</main>${ui.sheet ? slotSheet(ui.sheet) : ''}`;
+  $('#app').innerHTML = `<nav class="nav" aria-label="Main"><a class="brand" href="#/today">Hydro Garden</a>${NAV.map(([k, l, d]) => `<a href="#/${k}" class="${k === cur ? 'on' : ''}" ${k === cur ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span>${k === 'settings' ? '<i class="ghdot"></i>' : ''}</a>`).join('')}</nav>
+  <main id="main" class="view-${cur}"><p class="warn" id="gh-banner" hidden></p>${body}</main>${ui.sheet ? slotSheet(ui.sheet) : ''}`;
   document.body.classList.toggle('has-sheet', !!ui.sheet);
+  paintGh();
   if (active) { const el = document.getElementById(active); if (el && el.focus) { el.focus({ preventScroll: true }); } }
 }
 
@@ -400,6 +450,7 @@ const actions = {
     } catch (e) { ui.sync = { err: `Sync did not finish: ${e.message}` }; render(); }
   },
   async share() { const url = `${location.origin}${location.pathname}#/import/${encode(state)}`; try { await navigator.clipboard.writeText(url); ui.msg = 'Transfer link copied. Open it on the other device.'; } catch { prompt('Copy this link and open it on the other device:', url); } render(); },
+  'gh-now'() { syncNow(); },
   export() { download(`hydro-garden-backup-${today()}.json`, JSON.stringify(state, null, 1), 'application/json'); },
   reset() { if (confirm('Erase all slots, dates and settings on this device? This cannot be undone.')) { state = defaults(); commit(); } },
   'del-custom'(el) { const id = el.dataset.plant; if (confirm('Delete this plant? Slots that use it become empty.')) { state.custom = state.custom.filter(c => c.id !== id); for (const s of SLOT_IDS) if (state.slots[s].plant === id) state.slots[s] = emptySlot(); location.hash = '#/plants'; commit(); } },
@@ -423,11 +474,12 @@ document.addEventListener('change', e => {
   let v = el.type === 'checkbox' ? el.checked : el.value;
   if (el.type === 'number') v = el.value === '' ? null : Number(el.value);
   if (el.type === 'date' || el.tagName === 'SELECT') v = el.value || null;
+  if (path === 'gh.token') { gh.cfg = { token: el.value.trim(), sha: null }; saveCfg(gh.cfg); if (gh.cfg.token) connectGh(); else { gh.error = ''; render(); } return; }
   if (path.startsWith('ui.')) { ui[path.slice(3)] = el.value; return setTimeout(render); }
   if (path.startsWith('settings.') && v === null && !/lengthMm|widthMm|volumeL|fertDose/.test(path)) v = path.split('.').reduce((a, k) => a?.[k], { settings: DEFAULT_SETTINGS });
   if (/^slots\.\w+\.plant$/.test(path)) { state.slots[path.split('.')[1]] = emptySlot(v); }
   else setPath(state, path, v);
-  save(state); setTimeout(render);
+  persist(); setTimeout(render);
 });
 document.addEventListener('input', e => {
   const el = e.target;
@@ -450,8 +502,9 @@ window.addEventListener('hashchange', () => { ui.msg = null; if (!handleImport()
 function handleImport() {
   const m = location.hash.match(/^#\/import\/(.+)$/);
   if (!m) return false;
-  try { const next = decode(m[1]); if (confirm('Replace the garden on this device with the one from the link?')) { state = next; save(state); } } catch { alert('This transfer link is damaged. Copy it again on the other device.'); }
+  try { const next = decode(m[1]); if (confirm('Replace the garden on this device with the one from the link?')) { state = next; persist(); } } catch { alert('This transfer link is damaged. Copy it again on the other device.'); }
   history.replaceState(null, '', '#/today'); render();
   return true;
 }
 if (!handleImport()) render();
+syncNow();
