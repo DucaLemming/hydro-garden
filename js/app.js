@@ -302,6 +302,7 @@ function viewPlan() {
   return `<header class="view-head"><h1>Plan</h1><p class="sub">${anySown ? `Everything due in the next 20 weeks. Dates shift when you record what you see in a slot.` : 'No dates yet. Set a sowing day on the Today page or in a slot.'}</p></header>
   ${anySown ? `<section class="card cal"><h2>Calendar reminders</h2>
     <p>${items.length} reminders at ${esc(state.settings.reminderTime)} on the days tasks are due, one per day and colour.${state.lastSync ? ` Last sent to Google Calendar: ${fmt(state.lastSync.slice(0, 10))}.` : ''}</p>
+    <div class="row">${field({ id: 'plan-time', label: 'Calendar event time', type: 'time', path: 'settings.reminderTime', value: state.settings.reminderTime, help: 'The time of day at which garden events are put into your calendar and their reminders pop up. 24-hour format, for example 18:00. Events already in Google Calendar move to the new time at the next sync.' })}</div>
     <div class="row"><button class="btn primary" data-action="gcal-sync" ${sy?.busy ? 'disabled' : ''}>${sy?.busy ? esc(sy.msg || 'Working...') : 'Sync with Google Calendar'}</button>
     <button class="btn" data-action="ics">Download calendar file (.ics)</button></div>
     ${sy?.err ? `<p class="warn">${esc(sy.err)}</p>` : ''}${sy?.ok ? `<p class="okmsg">${esc(sy.ok)}</p>` : ''}
@@ -341,7 +342,7 @@ function viewSettings() {
     ${field({ id: 'fert', label: 'Fertilizer dose on the label', unit: 'ml per litre', path: 'settings.fertDose', value: s.fertDose, min: 0.1, max: 50, step: 0.1, placeholder: 'e.g. 4', help: 'The full dose printed on your nutrient bottle for one litre of water. If the label says "5 ml per 2 litres", enter 2.5.' })}
     ${field({ id: 'wc', label: 'Full water change every', unit: 'days', path: 'settings.waterChangeDays', value: s.waterChangeDays, min: 5, max: 60, step: 1, help: 'How many days pass between complete water changes. 14 is a good start; go to 21 if the water stays clear.' })}
     ${field({ id: 'topup', label: 'Water level check every', unit: 'days', path: 'settings.topUpDays', value: s.topUpDays, min: 0, max: 14, step: 1, help: 'A repeating calendar reminder to look at the fill indicator. Enter 0 to switch it off.' })}
-    ${field({ id: 'rem', label: 'Reminder time', type: 'time', path: 'settings.reminderTime', value: s.reminderTime, help: 'The time of day calendar reminders pop up, in 24-hour format, for example 18:00.' })}
+    ${field({ id: 'rem', label: 'Calendar event time', type: 'time', path: 'settings.reminderTime', value: s.reminderTime, help: 'The time of day at which garden events are put into your calendar and their reminders pop up. 24-hour format, for example 18:00. After changing it, sync or download the calendar again.' })}
     ${field({ id: 'light', label: 'Light starts at', type: 'time', path: 'settings.lightStart', value: s.lightStart, help: 'A note for you: the time of day you pressed the lamp timer. The 16-hour cycle repeats from then. After a power cut, press it again at this time.' })}
   </div></section>
   <section class="card" id="gcal"><h2>Google Calendar</h2>
