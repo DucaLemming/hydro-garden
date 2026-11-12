@@ -89,5 +89,15 @@ import { reconcile, repoFromLocation } from '../js/ghsync.js';
   const b = await reconcile({ ...base, local: { updatedAt: 0 } }); assert.equal(b.action, 'pulled'); assert.equal(b.state.x, 'Räm');
   assert.equal((await reconcile({ ...base, local: { updatedAt: 5 } })).action, 'same');
   assert.equal(repoFromLocation({ hostname: 'ducalemming.github.io', pathname: '/hydro-garden/' }), 'ducalemming/hydro-garden');
+  // separate data repo, empty at first
+  let f2 = null;
+  const fake2 = async (url, o) => {
+    if (o.method === 'GET' && url.includes('/contents/')) return f2 ? { ok: true, status: 200, json: async () => f2 } : { ok: false, status: 404, json: async () => ({}) };
+    if (o.method === 'GET') return { ok: true, status: 200, json: async () => ({ id: 1 }) };
+    const b2 = JSON.parse(o.body); assert.equal(b2.branch, undefined); f2 = { sha: 'd1', content: b2.content };
+    return { ok: true, status: 200, json: async () => ({ content: { sha: 'd1' } }) };
+  };
+  assert.equal((await reconcile({ token: 't', repo: 'a/data', branch: null, fetchFn: fake2, local: { updatedAt: 9 } })).action, 'pushed');
+  assert.equal((await reconcile({ token: 't', repo: 'a/data', branch: null, fetchFn: fake2, local: { updatedAt: 1 } })).action, 'pulled');
   console.log('GITHUB SYNC TESTS PASSED');
 }

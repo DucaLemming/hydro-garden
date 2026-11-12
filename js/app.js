@@ -18,7 +18,12 @@ const persist = () => { state.updatedAt = Date.now(); save(state); schedulePush(
 const commit = () => { persist(); render(); };
 
 // ---------- saving to GitHub so all devices agree ----------
-const gh = { cfg: loadCfg(), repo: repoFromLocation(location), status: '', error: '', busy: false, timer: null, at: null };
+const SITE_REPO = repoFromLocation(location);
+const gh = { cfg: loadCfg(), status: '', error: '', busy: false, timer: null, at: null,
+  get repo() { return (this.cfg.repo || SITE_REPO).trim(); },
+  get branch() { return this.repo.toLowerCase() === SITE_REPO.toLowerCase() ? BRANCH : null; } };
+const connectLink = () => `${location.origin}${location.pathname}#/connect/${encodeURIComponent(gh.repo)}/${encodeURIComponent(gh.cfg.token)}`;
+function qrSvg(text) { try { const q = window.qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch { return ''; } }
 const ghLine = () => (!gh.cfg.token ? 'Not connected. This device keeps its own copy.' : gh.error ? gh.error : gh.busy ? 'Saving to GitHub...' : gh.at ? `In sync with GitHub since ${gh.at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.` : 'Connected.');
 function paintGh() {
   document.querySelectorAll('[data-gh]').forEach(el => { el.textContent = ghLine(); el.classList.toggle('bad', !!gh.error); });
@@ -30,18 +35,18 @@ async function syncNow() {
   if (!gh.cfg.token || gh.busy) return;
   gh.busy = true; paintGh();
   try {
-    const r = await reconcile({ token: gh.cfg.token, repo: gh.repo, local: state });
+    const r = await reconcile({ token: gh.cfg.token, repo: gh.repo, branch: gh.branch, local: state });
     gh.cfg.sha = r.sha; saveCfg(gh.cfg); gh.error = ''; gh.at = new Date();
     if (r.action === 'pulled') { state = normalise(r.state); save(state); gh.busy = false; return render(); }
   } catch (e) { gh.error = e.message; }
   gh.busy = false; paintGh();
 }
-async function connectGh() {
+async function connectGh(join = false) {
   gh.error = ''; gh.busy = true; paintGh();
   try {
-    const remote = await pull({ token: gh.cfg.token, repo: gh.repo });
+    const remote = await pull({ token: gh.cfg.token, repo: gh.repo, branch: gh.branch });
     const has = remote.state && remote.state.updatedAt > 0;
-    if (has && confirm(`GitHub already holds a saved garden from ${new Date(remote.state.updatedAt).toLocaleString('en-GB')}. Use it on this device? Choose Cancel to keep this device's garden and overwrite the saved one.`)) { state = normalise(remote.state); save(state); }
+    if (has && (join || confirm(`GitHub already holds a saved garden from ${new Date(remote.state.updatedAt).toLocaleString('en-GB')}. Use it on this device? Choose Cancel to keep this device's garden and overwrite the saved one.`))) { state = normalise(remote.state); save(state); }
     else { state.updatedAt = Date.now(); save(state); }
     gh.busy = false; await syncNow(); render();
   } catch (e) { gh.busy = false; gh.error = e.message; render(); }
@@ -352,19 +357,30 @@ function viewSettings() {
     <p class="note">Then press "Sync with Google Calendar" on the <a href="#/plan">Plan</a> page. Google shows a notice that the app is unverified because you made it yourself: choose Continue.</p>
     <p class="note"><strong>"Error 403: access_denied" in the Google window?</strong> The app is in testing mode and the Google account you picked is not on its tester list. In the Google Cloud console open Google Auth Platform, Audience, and under "Test users" add the exact Google address you sign in with. Or press "Publish app" there, which lets any account through after the unverified-app notice.</p>
   </section>
-  <section class="card" id="ghsync"><h2>Save to GitHub and sync all devices</h2>
-    <p>With a GitHub access token, every change is saved to the file <code>garden.json</code> on the <code>${BRANCH}</code> branch of <code>${esc(gh.repo)}</code> within a couple of seconds, and every device with the token loads the newest version when you open it. Slots, dates, ticked tasks and all settings are included.</p>
-    <ol class="steps">
-      <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com, Settings, Developer settings, Fine-grained tokens, Generate new token</a>.</li>
-      <li>Name it "Hydro Garden". Choose an expiry (the app tells you when the token stops working).</li>
-      <li>Repository access: "Only select repositories", then pick <strong>${esc(gh.repo.split('/')[1])}</strong>.</li>
-      <li>Permissions, Repository permissions: set <strong>Contents</strong> to "Read and write". Nothing else.</li>
-      <li>Generate the token, copy it and paste it below. Do this once on each device.</li>
-    </ol>
-    ${field({ id: 'gh-token', label: 'GitHub access token', type: 'password', path: 'gh.token', value: gh.cfg.token, placeholder: 'github_pat_...', help: 'The fine-grained token from step 5, starting with github_pat_. It is stored only in this browser and is never saved to GitHub or put into transfer links. Clear the field to stop syncing on this device.' })}
+  <section class="card" id="ghsync"><h2>Sync all devices</h2>
+    <p>Every change is saved to GitHub within a couple of seconds, and every connected device loads the newest version when you open it. Slots, dates, ticked tasks and all settings are included.</p>
+    ${gh.cfg.token ? `
     <p class="ghstat" data-gh>${esc(ghLine())}</p>
-    <div class="row"><button class="btn" data-action="gh-now" ${gh.cfg.token ? '' : 'disabled'}>Sync now</button></div>
-    <p class="note">The repository is public, so the saved garden file can be read by anyone who looks for it. It holds plants, dates and settings, no personal data. If two devices change things within the same few seconds, the later change wins.</p>
+    <h3>Add another device</h3>
+    <p>Scan this code with the phone or tablet, or open the link on the other computer. That device is then connected. Nothing to type.</p>
+    <div class="connect"><div class="qr">${qrSvg(connectLink())}</div>
+      <div><button class="btn primary" data-action="copy-connect">Copy connection link</button>
+      <p class="note">The link contains the access key. Give it only to people who may change the garden${gh.branch ? ', and note that this key can also change the website files. A separate data repository avoids that (field below)' : ''}.</p></div></div>
+    <div class="row"><button class="btn" data-action="gh-now">Sync now</button><button class="btn danger" data-action="gh-off">Disconnect this device</button></div>` : `
+    <p><strong>One-time setup, on one device only.</strong> GitHub needs a key that allows saving. You create it once here; every other device then just scans a QR code or opens a link.</p>
+    <ol class="steps">
+      <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub, new fine-grained token</a>. Name it "Hydro Garden" and set the expiry as long as you like.</li>
+      <li>Repository access: "Only select repositories", then pick <strong>${esc(gh.repo.split('/')[1] || '')}</strong>.</li>
+      <li>Repository permissions: set <strong>Contents</strong> to "Read and write". Nothing else.</li>
+      <li>Generate the token and paste it below.</li>
+    </ol>
+    <p class="ghstat" data-gh>${esc(ghLine())}</p>`}
+    <div class="grid2">
+    ${field({ id: 'gh-token', label: 'GitHub access token', type: 'password', path: 'gh.token', value: gh.cfg.token, placeholder: 'github_pat_...', help: 'The fine-grained token, starting with github_pat_. It is stored only in this browser and in connection links you create. Other devices do not need you to type it: use the QR code or link that appears here after connecting.' })}
+    ${field({ id: 'gh-repo', label: 'Repository for the saved garden', type: 'text', path: 'gh.repo', value: gh.cfg.repo, placeholder: SITE_REPO, help: `Leave empty to save into the website's own repository (${SITE_REPO}). To keep the saved garden private, or to share the connection link safely, enter a separate repository as owner/name, for example ${SITE_REPO}-data, and limit the token to it.` })}
+    </div>
+    ${gh.branch ? `<p class="note">Saved as <code>garden.json</code> on the <code>${BRANCH}</code> branch of the public repository <code>${esc(gh.repo)}</code>, so the file is readable by anyone who looks for it. It holds plants, dates and settings.</p>` : `<p class="note">Saved as <code>garden.json</code> in <code>${esc(gh.repo)}</code>.</p>`}
+    <p class="note">If two devices change things within the same few seconds, the later change wins.</p>
   </section>
   <section class="card"><h2>Move data by hand</h2>
     <p>Without a token, each browser keeps its own copy. A transfer link or a backup file carries it across.</p>
@@ -451,6 +467,8 @@ const actions = {
   },
   async share() { const url = `${location.origin}${location.pathname}#/import/${encode(state)}`; try { await navigator.clipboard.writeText(url); ui.msg = 'Transfer link copied. Open it on the other device.'; } catch { prompt('Copy this link and open it on the other device:', url); } render(); },
   'gh-now'() { syncNow(); },
+  'gh-off'() { if (confirm('Stop syncing on this device? The garden stays here as a local copy.')) { gh.cfg = { token: '', sha: null, repo: '' }; saveCfg(gh.cfg); gh.error = ''; render(); } },
+  async 'copy-connect'() { try { await navigator.clipboard.writeText(connectLink()); ui.msg = 'Connection link copied.'; } catch { prompt('Copy this link and open it on the other device:', connectLink()); } render(); },
   export() { download(`hydro-garden-backup-${today()}.json`, JSON.stringify(state, null, 1), 'application/json'); },
   reset() { if (confirm('Erase all slots, dates and settings on this device? This cannot be undone.')) { state = defaults(); commit(); } },
   'del-custom'(el) { const id = el.dataset.plant; if (confirm('Delete this plant? Slots that use it become empty.')) { state.custom = state.custom.filter(c => c.id !== id); for (const s of SLOT_IDS) if (state.slots[s].plant === id) state.slots[s] = emptySlot(); location.hash = '#/plants'; commit(); } },
@@ -474,7 +492,8 @@ document.addEventListener('change', e => {
   let v = el.type === 'checkbox' ? el.checked : el.value;
   if (el.type === 'number') v = el.value === '' ? null : Number(el.value);
   if (el.type === 'date' || el.tagName === 'SELECT') v = el.value || null;
-  if (path === 'gh.token') { gh.cfg = { token: el.value.trim(), sha: null }; saveCfg(gh.cfg); if (gh.cfg.token) connectGh(); else { gh.error = ''; render(); } return; }
+  if (path === 'gh.repo') { gh.cfg = { ...gh.cfg, repo: el.value.trim().replace(/^https:\/\/github\.com\//, '').replace(/\/$/, ''), sha: null }; saveCfg(gh.cfg); if (gh.cfg.token) connectGh(); else render(); return; }
+  if (path === 'gh.token') { gh.cfg = { ...gh.cfg, token: el.value.trim(), sha: null }; saveCfg(gh.cfg); if (gh.cfg.token) connectGh(); else { gh.error = ''; render(); } return; }
   if (path.startsWith('ui.')) { ui[path.slice(3)] = el.value; return setTimeout(render); }
   if (path.startsWith('settings.') && v === null && !/lengthMm|widthMm|volumeL|fertDose/.test(path)) v = path.split('.').reduce((a, k) => a?.[k], { settings: DEFAULT_SETTINGS });
   if (/^slots\.\w+\.plant$/.test(path)) { state.slots[path.split('.')[1]] = emptySlot(v); }
@@ -500,6 +519,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && ui.sheet) 
 window.addEventListener('hashchange', () => { ui.msg = null; if (!handleImport()) { render(); window.scrollTo(0, 0); } });
 
 function handleImport() {
+  const c = location.hash.match(/^#\/connect\/([^/]+)\/(.+)$/);
+  if (c) {
+    history.replaceState(null, '', '#/today');   // take the key out of the address bar and history entry
+    const repo = decodeURIComponent(c[1]);
+    gh.cfg = { token: decodeURIComponent(c[2]), sha: null, repo: repo.toLowerCase() === SITE_REPO.toLowerCase() ? '' : repo }; saveCfg(gh.cfg);
+    render(); connectGh(true);
+    return true;
+  }
   const m = location.hash.match(/^#\/import\/(.+)$/);
   if (!m) return false;
   try { const next = decode(m[1]); if (confirm('Replace the garden on this device with the one from the link?')) { state = next; persist(); } } catch { alert('This transfer link is damaged. Copy it again on the other device.'); }

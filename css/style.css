@@ -192,3 +192,7 @@ details.dates { border: 1px solid var(--line); border-radius: 8px; padding: .6re
 .guide-harvest { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
 .guide-harvest .harvest { grid-template-columns: 72px 1fr; align-items: start; } .guide-harvest .cutg { width: 72px; }
 .guide-harvest h3 { margin: 0 0 .2rem; } .guide-harvest p { font-size: .93rem; margin: 0; }
+
+.connect { display: grid; grid-template-columns: minmax(150px, 210px) 1fr; gap: 1.2rem; align-items: center; margin: .6rem 0 1rem; }
+.qr svg { width: 100%; height: auto; display: block; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+@media (max-width: 520px) { .connect { grid-template-columns: 1fr; } .qr { max-width: 230px; } }
