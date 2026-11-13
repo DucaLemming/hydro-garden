@@ -25,15 +25,20 @@ const gh = { cfg: loadCfg(), status: '', error: '', busy: false, timer: null, at
 const connectLink = () => `${location.origin}${location.pathname}#/connect/${encodeURIComponent(gh.repo)}/${encodeURIComponent(gh.cfg.token)}`;
 function qrSvg(text) { try { const q = window.qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch { return ''; } }
 const ghLine = () => (!gh.cfg.token ? 'Not connected. This device keeps its own copy.' : gh.error ? gh.error : gh.busy ? 'Saving to GitHub...' : gh.at ? `In sync with GitHub since ${gh.at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.` : 'Connected.');
+const SYNC_TXT = { off: 'Sync off', ok: 'Synced', busy: 'Syncing', pending: 'Changes waiting', err: 'Sync error' };
+const ghState = () => (!gh.cfg.token ? 'off' : gh.busy ? 'busy' : gh.error ? 'err' : gh.pending ? 'pending' : 'ok');
+const CLOUD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18.5a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5a4.5 4.5 0 0 1-.5 9z"/></svg>';
+const syncBtn = top => `<button type="button" class="syncbtn sync-${ghState()} ${top ? 'top' : ''}" data-action="open-sync">${CLOUD}<span class="sync-t">${SYNC_TXT[ghState()]}</span></button>`;
 function paintGh() {
   document.querySelectorAll('[data-gh]').forEach(el => { el.textContent = ghLine(); el.classList.toggle('bad', !!gh.error); });
-  const dot = $('.nav .ghdot'); if (dot) dot.className = `ghdot ${!gh.cfg.token ? 'off' : gh.error ? 'bad' : 'ok'}`;
+  const st = ghState();
+  document.querySelectorAll('.syncbtn').forEach(b => { b.className = `syncbtn sync-${st} ${b.classList.contains('top') ? 'top' : ''}`; b.title = st === 'err' ? `Sync error: ${gh.error}` : ghLine(); b.setAttribute('aria-label', `Sync: ${SYNC_TXT[st]}. Open sync settings`); b.querySelector('.sync-t').textContent = SYNC_TXT[st]; });
   const ban = $('#gh-banner'); if (ban) { ban.hidden = !gh.error; ban.textContent = gh.error ? `Not saved to GitHub: ${gh.error}` : ''; }
 }
-function schedulePush() { if (!gh.cfg.token) return; clearTimeout(gh.timer); gh.timer = setTimeout(syncNow, 1500); }
+function schedulePush() { if (!gh.cfg.token) return; gh.pending = true; clearTimeout(gh.timer); gh.timer = setTimeout(syncNow, 1500); paintGh(); }
 async function syncNow() {
   if (!gh.cfg.token || gh.busy) return;
-  gh.busy = true; paintGh();
+  gh.busy = true; gh.pending = false; paintGh();
   try {
     const r = await reconcile({ token: gh.cfg.token, repo: gh.repo, branch: gh.branch, local: state });
     gh.cfg.sha = r.sha; saveCfg(gh.cfg); gh.error = ''; gh.at = new Date();
@@ -425,7 +430,7 @@ function render() {
   const active = document.activeElement?.id;
   const body = view === 'tray' ? viewTray() : view === 'plan' ? viewPlan() : view === 'plants' ? viewPlants(arg) : view === 'guide' ? viewGuide(state, plants(), field) : view === 'settings' ? viewSettings() : viewToday();
   const cur = NAV.some(n => n[0] === view) ? view : 'today';
-  $('#app').innerHTML = `<nav class="nav" aria-label="Main"><a class="brand" href="#/today">Hydro Garden</a>${NAV.map(([k, l, d]) => `<a href="#/${k}" class="${k === cur ? 'on' : ''}" ${k === cur ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span>${k === 'settings' ? '<i class="ghdot"></i>' : ''}</a>`).join('')}</nav>
+  $('#app').innerHTML = `<nav class="nav" aria-label="Main"><a class="brand" href="#/today">Hydro Garden</a>${NAV.map(([k, l, d]) => `<a href="#/${k}" class="${k === cur ? 'on' : ''}" ${k === cur ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span></a>`).join('')}<div class="nav-foot">${syncBtn(false)}</div></nav>${syncBtn(true)}
   <main id="main" class="view-${cur}"><p class="warn" id="gh-banner" hidden></p>${body}</main>${ui.sheet ? slotSheet(ui.sheet) : ''}`;
   document.body.classList.toggle('has-sheet', !!ui.sheet);
   paintGh();
@@ -468,6 +473,7 @@ const actions = {
   },
   async share() { const url = `${location.origin}${location.pathname}#/import/${encode(state)}`; try { await navigator.clipboard.writeText(url); ui.msg = 'Transfer link copied. Open it on the other device.'; } catch { prompt('Copy this link and open it on the other device:', url); } render(); },
   'gh-now'() { syncNow(); },
+  'open-sync'() { ui.sheet = null; location.hash = '#/settings'; setTimeout(() => document.getElementById('ghsync')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60); },
   'gh-off'() { if (confirm('Stop syncing on this device? The garden stays here as a local copy.')) { gh.cfg = { token: '', sha: null, repo: '' }; saveCfg(gh.cfg); gh.error = ''; render(); } },
   async 'copy-connect'() { try { await navigator.clipboard.writeText(connectLink()); ui.msg = 'Connection link copied.'; } catch { prompt('Copy this link and open it on the other device:', connectLink()); } render(); },
   export() { download(`hydro-garden-backup-${today()}.json`, JSON.stringify(state, null, 1), 'application/json'); },
