@@ -210,3 +210,5 @@ details.dates { border: 1px solid var(--line); border-radius: 8px; padding: .6re
   .syncbtn.top .sync-t { position: absolute; left: -999px; }
   .view-head { padding-right: 52px; }
 }
+
+.calwarn { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; justify-content: space-between; }

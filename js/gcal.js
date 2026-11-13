@@ -5,6 +5,8 @@ import { plus15 } from './ics.js';
 const SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
 const API = 'https://www.googleapis.com/calendar/v3';
 let token = null, tokenExp = 0;
+// True while Google still accepts the sign-in from the last sync (about one hour).
+export const hasToken = () => !!token && Date.now() < tokenExp - 60000;
 
 function loadGis() {
   return new Promise((res, rej) => {
@@ -30,7 +32,7 @@ export async function getToken(clientId) {
   });
 }
 
-const hash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+export const hash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 
 export function eventBody(it, tz, colors) {
   const body = {

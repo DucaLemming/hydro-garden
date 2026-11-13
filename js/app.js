@@ -3,7 +3,7 @@ import { geo, layers, waterTargets, DEFAULT_SETTINGS } from './geometry.js';
 import { allPlants, plantMap, CATS as PLANT_CATS, START_LABEL, sowText, short } from './plants.js';
 import { buildSchedule, milestones, stageOf, doseText, CATS, SLOT_IDS } from './schedule.js';
 import { calendarItems, toICS } from './ics.js';
-import { sync } from './gcal.js';
+import { sync, hasToken, hash } from './gcal.js';
 import { crossSection, gauge, cutGlyph } from './diagrams.js';
 import { today, addDays, diffDays, fmt, fmtLong, round, esc } from './util.js';
 import { viewGuide } from './guide.js';
@@ -14,7 +14,35 @@ const ui = { sheet: null, cats: new Set(), showDone: false, q: '', sync: null, l
 const $ = sel => document.querySelector(sel);
 const plants = () => plantMap(state.custom);
 const sched = () => buildSchedule(state, plants(), today());
-const persist = () => { state.updatedAt = Date.now(); save(state); schedulePush(); };
+const persist = () => { state.updatedAt = Date.now(); save(state); schedulePush(); scheduleCal(); };
+
+// ---------- keeping Google Calendar in step with the plan ----------
+// What was last sent is remembered per reminder, so a ticked or shifted task shows up as "out of date".
+const calNow = () => { const sc = sched(); return sc.tank ? calendarItems(sc, state, today(), CATS) : []; };
+const calSig = items => Object.fromEntries(items.map(i => [i.key, hash(`${i.date}|${i.time}|${i.title}|${i.body}|${i.every || ''}`)]));
+function calChanges() {
+  if (!state.calSynced || !state.settings.gcalClientId) return 0;
+  const was = state.calSynced, now = calSig(calNow()), d = today();
+  let n = 0;
+  for (const k of Object.keys(now)) if (was[k] !== now[k]) n++;
+  for (const k of Object.keys(was)) if (!(k in now) && (k === 'tank:topup' || k.slice(0, 10) >= d)) n++;
+  return n;
+}
+let calTimer = null;
+function scheduleCal() { clearTimeout(calTimer); calTimer = setTimeout(() => { if (hasToken() && calChanges() && !ui.sync?.busy) runCalSync(true); }, 4000); }
+async function runCalSync(quiet) {
+  const s = state.settings;
+  if (!s.gcalClientId) { ui.sync = { err: 'Add your Google client ID in Settings first. The steps are listed there.' }; return render(); }
+  ui.sync = { busy: true, msg: quiet ? 'Updating Google Calendar...' : 'Waiting for Google sign-in...' }; if (!quiet) render();
+  try {
+    const items = calNow();
+    const r = await sync({ clientId: s.gcalClientId.trim(), calendarId: s.gcalCalendarId, items, colors: CATS, today: today(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Berlin', onProgress: (n, t) => { if (!quiet && (n % 5 === 0 || n === t)) { ui.sync = { busy: true, msg: `Sending ${n} of ${t}...` }; render(); } } });
+    state.settings.gcalCalendarId = r.calendarId; state.lastSync = new Date().toISOString(); state.calSynced = calSig(items);
+    ui.sync = { ok: `Calendar "Hydro Garden" is up to date: ${r.created} added, ${r.updated} changed, ${r.removed} removed.` };
+    state.updatedAt = Date.now(); save(state); schedulePush(); render();
+  } catch (e) { ui.sync = { err: `Google Calendar was not updated: ${e.message}` }; render(); }
+}
+const calBanner = () => { const n = calChanges(); return n && !ui.sync?.busy ? `<div class="warn calwarn"><span>Google Calendar still shows ${n} reminder${n > 1 ? 's' : ''} that changed or ${n > 1 ? 'are' : 'is'} done.</span><button class="btn small" data-action="gcal-sync">Update Google Calendar</button></div>` : ''; };
 const commit = () => { persist(); render(); };
 
 // ---------- saving to GitHub so all devices agree ----------
@@ -156,7 +184,7 @@ function viewToday() {
       ${anySown ? waterCard(sc) : ''}
     </div>
     <div class="col">
-      ${sc.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}
+      ${calBanner()}${sc.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}
       ${anySown ? `<section class="card"><h2>To do now</h2>${due.length ? `<ul class="tasks">${due.map(t => taskRow(t)).join('')}</ul>` : '<p class="empty">All done. Check the water level if you have not looked for two or three days.</p>'}</section>
       <section class="card"><h2>Next 7 days</h2>${soon.length ? `<ul class="tasks">${soon.map(t => taskRow(t, { showDate: true })).join('')}</ul>` : '<p class="empty">Nothing scheduled.</p>'}<p><a href="#/plan">See the whole plan</a></p></section>` : waterPreview()}
     </div>
@@ -310,7 +338,8 @@ function viewPlan() {
     <div class="row">${field({ id: 'plan-time', label: 'Calendar event time', type: 'time', path: 'settings.reminderTime', value: state.settings.reminderTime, help: 'The time of day at which garden events are put into your calendar and their reminders pop up. 24-hour format, for example 18:00. Events already in Google Calendar move to the new time at the next sync.' })}</div>
     <div class="row"><button class="btn primary" data-action="gcal-sync" ${sy?.busy ? 'disabled' : ''}>${sy?.busy ? esc(sy.msg || 'Working...') : 'Sync with Google Calendar'}</button>
     <button class="btn" data-action="ics">Download calendar file (.ics)</button></div>
-    ${sy?.err ? `<p class="warn">${esc(sy.err)}</p>` : ''}${sy?.ok ? `<p class="okmsg">${esc(sy.ok)}</p>` : ''}
+    ${sy?.err ? `<p class="warn">${esc(sy.err)}</p>` : ''}${sy?.ok && !calChanges() ? `<p class="okmsg">${esc(sy.ok)}</p>` : ''}${calBanner()}
+    ${state.calSynced ? `<p class="note">Ticked or shifted tasks are taken out of Google Calendar automatically for about an hour after a sync on this device. After that, Google wants a fresh sign-in, so the app shows an "Update Google Calendar" button instead.</p>` : ''}
     ${state.settings.gcalClientId ? '' : `<p class="note">Sync needs a one-time setup. <a href="#/settings">Open Settings, Google Calendar</a>. The calendar file works without setup: import it at calendar.google.com under Settings, Import.</p>`}
   </section>` : ''}
   <section class="card">
@@ -459,18 +488,7 @@ const actions = {
   cat(el) { const c = el.dataset.cat; ui.cats.has(c) ? ui.cats.delete(c) : ui.cats.add(c); render(); },
   'show-done'(el) { ui.showDone = el.checked; render(); },
   ics() { download('hydro-garden.ics', toICS(calendarItems(sched(), state, today(), CATS)), 'text/calendar'); },
-  async 'gcal-sync'() {
-    const s = state.settings;
-    if (!s.gcalClientId) { ui.sync = { err: 'Add your Google client ID in Settings first. The steps are listed there.' }; return render(); }
-    ui.sync = { busy: true, msg: 'Waiting for Google sign-in...' }; render();
-    try {
-      const items = calendarItems(sched(), state, today(), CATS);
-      const r = await sync({ clientId: s.gcalClientId.trim(), calendarId: s.gcalCalendarId, items, colors: CATS, today: today(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Berlin', onProgress: (n, t) => { if (n % 5 === 0 || n === t) { ui.sync = { busy: true, msg: `Sending ${n} of ${t}...` }; render(); } } });
-      state.settings.gcalCalendarId = r.calendarId; state.lastSync = new Date().toISOString();
-      ui.sync = { ok: `Calendar "Hydro Garden" is up to date: ${r.created} added, ${r.updated} changed, ${r.removed} removed.` };
-      commit();
-    } catch (e) { ui.sync = { err: `Sync did not finish: ${e.message}` }; render(); }
-  },
+  'gcal-sync'() { runCalSync(false); },
   async share() { const url = `${location.origin}${location.pathname}#/import/${encode(state)}`; try { await navigator.clipboard.writeText(url); ui.msg = 'Transfer link copied. Open it on the other device.'; } catch { prompt('Copy this link and open it on the other device:', url); } render(); },
   'gh-now'() { syncNow(); },
   'open-sync'() { ui.sheet = null; location.hash = '#/settings'; setTimeout(() => document.getElementById('ghsync')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60); },
