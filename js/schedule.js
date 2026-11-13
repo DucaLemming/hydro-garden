@@ -121,6 +121,17 @@ export function buildSchedule(state, plants, today) {
     const older = diffDays(d, firstSow) >= 70;
     add({ id: `tank:wc:${d}`, date: d, cat: 'water', waterChange: true, title: 'Full water change', detail: `Lift the baskets out, pour the old water away, wipe the tank and refill to ${fill.text}. ${doseText(s, strengthAt(d))}${older ? ' Check the roots while the baskets are out and trim any that mat on the tank floor.' : ''}` });
   }
+  // Water level checks are ordinary tasks, so the plan and the calendar always list the same things.
+  if (s.topUpDays > 0) {
+    const changeDays = new Set(tasks.filter(t => t.waterChange).map(t => t.date));
+    let d = addDays(firstSow, s.topUpDays);
+    if (d < today) d = addDays(d, Math.ceil(diffDays(today, d) / s.topUpDays) * s.topUpDays);
+    for (; d <= end; d = addDays(d, s.topUpDays)) {
+      if (changeDays.has(d)) continue;
+      const w = wt[modeAt(d)];
+      add({ id: `tank:check:${d}`, date: d, cat: 'water', title: 'Check the water level', detail: `Look at the fill indicator. Top up when the level is ${w.low.at}, and fill to ${w.fill.text}. ${doseText(s, strengthAt(d))}` });
+    }
+  }
   const firstHarvest = active.map(x => x.m.harvest).sort()[0];
   for (let d = addDays(firstHarvest, 7); d <= end; d = addDays(d, 7)) {
     const ready = active.filter(x => d >= x.m.harvest && (!x.m.end || d < x.m.end));

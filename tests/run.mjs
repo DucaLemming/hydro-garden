@@ -40,7 +40,12 @@ assert.ok(diffDays(h2, h1) > 0, 'late sprout delays harvest');
 const st3 = structuredClone(state); st3.slots.C1 = { plant: 'coriander', sown: addDays(today, 50) };
 assert.ok(buildSchedule(st3, pm, addDays(today, 50)).warnings.length === 1);
 const items = calendarItems(sch, state, today, CATS); const ics = toICS(items);
-assert.ok(ics.includes('RRULE:FREQ=DAILY;INTERVAL=3') && ics.split('BEGIN:VEVENT').length - 1 === items.length);
+assert.ok(!ics.includes('RRULE') && ics.split('BEGIN:VEVENT').length - 1 === items.length);
+// every calendar entry is made of tasks that the plan shows, and every open task from today on is in the calendar
+{ const open = sch.tasks.filter(t => t.date >= today); const keys = new Set(open.map(t => `${t.date}:${t.cat}`));
+  assert.deepEqual([...keys].sort(), items.map(i => i.key).sort());
+  assert.ok(sch.tasks.some(t => t.id.startsWith('tank:check:')));
+  const wc = new Set(sch.tasks.filter(t => t.waterChange).map(t => t.date)); assert.ok(!sch.tasks.some(t => t.id.startsWith('tank:check:') && wc.has(t.date))); }
 for (const line of ics.split('\r\n')) assert.ok([...line].length <= 75, line);
 console.log(items.length, 'calendar items');
 console.log(sch.tasks.slice(0, 60).map(t => `${t.date} ${t.cat.padEnd(7)} ${t.title}`).join('\n'));

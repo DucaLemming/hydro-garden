@@ -54,3 +54,11 @@ export async function reconcile({ token, repo, local, branch = BRANCH, fetchFn =
   }
   return { action: 'same', state: local, sha: remote.sha };
 }
+
+// Reads another small JSON file next to the garden (written by the calendar job on GitHub). Missing file = null.
+export async function readJson({ token, repo, branch = BRANCH, file, fetchFn = fetch }) {
+  try {
+    const j = await call(fetchFn, token, 'GET', `/repos/${repo}/contents/${file}?${branch ? `ref=${branch}&` : ''}t=${Date.now()}`);
+    return JSON.parse(dec(j.content));
+  } catch { return null; }
+}

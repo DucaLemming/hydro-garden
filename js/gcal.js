@@ -49,7 +49,7 @@ export function eventBody(it, tz, colors) {
 
 // Brings the calendar in line with `items`: adds new reminders, updates changed ones,
 // removes upcoming ones that are no longer due. Reminders in the past are left alone.
-export async function sync({ clientId, calendarId, items, tz, colors, today, fetchFn = fetch, tokenFn = getToken, onProgress = () => {} }) {
+export async function sync({ clientId, calendarId, items, tz, colors, today, create = true, fetchFn = fetch, tokenFn = getToken, onProgress = () => {} }) {
   const tk = await tokenFn(clientId);
   const call = async (method, path, body) => {
     const r = await fetchFn(API + path, { method, headers: { Authorization: `Bearer ${tk}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
@@ -60,6 +60,7 @@ export async function sync({ clientId, calendarId, items, tz, colors, today, fet
   };
   let calId = calendarId;
   if (calId) { try { await call('GET', `/calendars/${encodeURIComponent(calId)}`); } catch (e) { if (e.status === 404 || e.status === 403) calId = null; else throw e; } }
+  if (!calId && !create) throw new Error('The calendar is not shared with this account.');
   if (!calId) calId = (await call('POST', '/calendars', { summary: 'Hydro Garden', description: 'Reminders from the Hydro Garden planner.', timeZone: tz })).id;
   const cal = encodeURIComponent(calId);
   const existing = new Map();

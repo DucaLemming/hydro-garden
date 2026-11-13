@@ -23,6 +23,10 @@ Tests for the calculations: `node tests/run.mjs`
 
 The steps are in the app under Settings, Google Calendar. In short: create a Google Cloud project, enable the Google Calendar API, configure the consent screen with yourself as test user, create a "Web application" OAuth client with this site's address as an authorized JavaScript origin, and paste the client ID into Settings. The app asks only for the `calendar.app.created` permission, so it can see and change only the calendar it creates.
 
+## Fully automatic calendar updates
+
+`.github/workflows/calendar.yml` runs `tools/calendar-sync.mjs` whenever the app saves `garden.json` to the `garden-data` branch, and once every morning. It builds the same task list as the app and corrects the Google calendar through a service account (repository secret `GOOGLE_SERVICE_ACCOUNT`, the calendar shared with that account). The result is written to `calendar-status.json` on the data branch, which the app reads. Setup steps are in the app under Settings.
+
 ## Data
 
 Everything is stored in the browser's localStorage. With a fine-grained GitHub token (Contents: read and write on this repo only) entered in Settings, every change is also saved to `garden.json` on the `garden-data` branch and loaded by every other device that has the token. The token stays in the browser. That branch is separate from `main`, so saving does not redeploy the site. Without a token, Settings has a transfer link and a backup file.

@@ -7,7 +7,7 @@ import { sync, hasToken, hash } from './gcal.js';
 import { crossSection, gauge, cutGlyph } from './diagrams.js';
 import { today, addDays, diffDays, fmt, fmtLong, round, esc } from './util.js';
 import { viewGuide } from './guide.js';
-import { loadCfg, saveCfg, reconcile, pull, repoFromLocation, BRANCH } from './ghsync.js';
+import { loadCfg, saveCfg, reconcile, pull, readJson, repoFromLocation, BRANCH } from './ghsync.js';
 
 let state = load();
 const ui = { sheet: null, cats: new Set(), showDone: false, q: '', sync: null, litres: '', sowDay: today(), open: {} };
@@ -20,7 +20,10 @@ const persist = () => { state.updatedAt = Date.now(); save(state); schedulePush(
 // What was last sent is remembered per reminder, so a ticked or shifted task shows up as "out of date".
 const calNow = () => { const sc = sched(); return sc.tank ? calendarItems(sc, state, today(), CATS) : []; };
 const calSig = items => Object.fromEntries(items.map(i => [i.key, hash(`${i.date}|${i.time}|${i.title}|${i.body}|${i.every || ''}`)]));
+// When the calendar job on GitHub is set up, it reports here and the browser stays out of it.
+const calAuto = () => { const a = ui.calAuto; return a && Date.now() - Date.parse(a.at) < 3 * 864e5 ? a : null; };
 function calChanges() {
+  if (calAuto()?.ok) return 0;
   if (!state.calSynced || !state.settings.gcalClientId) return 0;
   const was = state.calSynced, now = calSig(calNow()), d = today();
   let n = 0;
@@ -70,6 +73,7 @@ async function syncNow() {
   try {
     const r = await reconcile({ token: gh.cfg.token, repo: gh.repo, branch: gh.branch, local: state });
     gh.cfg.sha = r.sha; saveCfg(gh.cfg); gh.error = ''; gh.at = new Date();
+    if (gh.branch) readJson({ token: gh.cfg.token, repo: gh.repo, branch: gh.branch, file: 'calendar-status.json' }).then(a => { const was = JSON.stringify(ui.calAuto); ui.calAuto = a; if (JSON.stringify(a) !== was && /^#\/(plan|today|settings)?$/.test(location.hash || '#/') && !ui.sheet && !document.activeElement?.matches?.('input,select,textarea')) render(); });
     if (r.action === 'pulled') { state = normalise(r.state); save(state); gh.busy = false; return render(); }
   } catch (e) { gh.error = e.message; }
   gh.busy = false; paintGh();
@@ -336,10 +340,11 @@ function viewPlan() {
   ${anySown ? `<section class="card cal"><h2>Calendar reminders</h2>
     <p>${items.length} reminders at ${esc(state.settings.reminderTime)} on the days tasks are due, one per day and colour.${state.lastSync ? ` Last sent to Google Calendar: ${fmt(state.lastSync.slice(0, 10))}.` : ''}</p>
     <div class="row">${field({ id: 'plan-time', label: 'Calendar event time', type: 'time', path: 'settings.reminderTime', value: state.settings.reminderTime, help: 'The time of day at which garden events are put into your calendar and their reminders pop up. 24-hour format, for example 18:00. Events already in Google Calendar move to the new time at the next sync.' })}</div>
+    ${calAuto() ? (calAuto().ok ? `<p class="okmsg">Google Calendar is updated automatically after every change. Last update ${new Date(calAuto().at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${calAuto().reminders} reminders in the calendar.</p>` : `<p class="warn">The automatic calendar update failed: ${esc(calAuto().error)}</p>`) : `<p class="note">Want this to happen by itself after every change? <a href="#/settings" data-action="open-auto">Set up automatic updates</a> once.</p>`}
     <div class="row"><button class="btn primary" data-action="gcal-sync" ${sy?.busy ? 'disabled' : ''}>${sy?.busy ? esc(sy.msg || 'Working...') : 'Sync with Google Calendar'}</button>
     <button class="btn" data-action="ics">Download calendar file (.ics)</button></div>
     ${sy?.err ? `<p class="warn">${esc(sy.err)}</p>` : ''}${sy?.ok && !calChanges() ? `<p class="okmsg">${esc(sy.ok)}</p>` : ''}${calBanner()}
-    ${state.calSynced ? `<p class="note">Ticked or shifted tasks are taken out of Google Calendar automatically for about an hour after a sync on this device. After that, Google wants a fresh sign-in, so the app shows an "Update Google Calendar" button instead.</p>` : ''}
+    ${state.calSynced && !calAuto()?.ok ? `<p class="note">Without the automatic setup, ticked or shifted tasks are taken out of Google Calendar by this device for about an hour after a sync. After that, Google wants a fresh sign-in, so the app shows an "Update Google Calendar" button instead.</p>` : ''}
     ${state.settings.gcalClientId ? '' : `<p class="note">Sync needs a one-time setup. <a href="#/settings">Open Settings, Google Calendar</a>. The calendar file works without setup: import it at calendar.google.com under Settings, Import.</p>`}
   </section>` : ''}
   <section class="card">
@@ -375,7 +380,7 @@ function viewSettings() {
   <section class="card"><h2>Fertilizer, water changes and reminders</h2><div class="grid2">
     ${field({ id: 'fert', label: 'Fertilizer dose on the label', unit: 'ml per litre', path: 'settings.fertDose', value: s.fertDose, min: 0.1, max: 50, step: 0.1, placeholder: 'e.g. 4', help: 'The full dose printed on your nutrient bottle for one litre of water. If the label says "5 ml per 2 litres", enter 2.5.' })}
     ${field({ id: 'wc', label: 'Full water change every', unit: 'days', path: 'settings.waterChangeDays', value: s.waterChangeDays, min: 5, max: 60, step: 1, help: 'How many days pass between complete water changes. 14 is a good start; go to 21 if the water stays clear.' })}
-    ${field({ id: 'topup', label: 'Water level check every', unit: 'days', path: 'settings.topUpDays', value: s.topUpDays, min: 0, max: 14, step: 1, help: 'A repeating calendar reminder to look at the fill indicator. Enter 0 to switch it off.' })}
+    ${field({ id: 'topup', label: 'Water level check every', unit: 'days', path: 'settings.topUpDays', value: s.topUpDays, min: 0, max: 14, step: 1, help: 'How often a "Check the water level" task appears in the plan and the calendar. Enter 0 to switch these tasks off.' })}
     ${field({ id: 'rem', label: 'Calendar event time', type: 'time', path: 'settings.reminderTime', value: s.reminderTime, help: 'The time of day at which garden events are put into your calendar and their reminders pop up. 24-hour format, for example 18:00. After changing it, sync or download the calendar again.' })}
     ${field({ id: 'light', label: 'Light starts at', type: 'time', path: 'settings.lightStart', value: s.lightStart, help: 'A note for you: the time of day you pressed the lamp timer. The 16-hour cycle repeats from then. After a power cut, press it again at this time.' })}
   </div></section>
@@ -391,6 +396,20 @@ function viewSettings() {
     ${field({ id: 'gcid', label: 'Google client ID', type: 'text', path: 'settings.gcalClientId', value: s.gcalClientId, placeholder: '1234567890-abc.apps.googleusercontent.com', help: 'The OAuth client ID from step 5. It is not a password and can safely be stored here. Paste it on each device you use.' })}
     <p class="note">Then press "Sync with Google Calendar" on the <a href="#/plan">Plan</a> page. Google shows a notice that the app is unverified because you made it yourself: choose Continue.</p>
     <p class="note"><strong>"Error 403: access_denied" in the Google window?</strong> The app is in testing mode and the Google account you picked is not on its tester list. In the Google Cloud console open Google Auth Platform, Audience, and under "Test users" add the exact Google address you sign in with. Or press "Publish app" there, which lets any account through after the unverified-app notice.</p>
+  </section>
+  <section class="card" id="gcal-auto"><h2>Google Calendar, fully automatic</h2>
+    ${calAuto() ? (calAuto().ok ? `<p class="okmsg">Working. Last update ${new Date(calAuto().at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}, ${calAuto().reminders} reminders in the calendar.</p>` : `<p class="warn">Last run failed: ${esc(calAuto().error)}</p>`) : ''}
+    <p>A website can only write to your calendar for an hour after you sign in. To update the calendar without you, the job has to run on GitHub instead: every time the app saves the garden, GitHub works out the open tasks and corrects the calendar, usually within a minute. It also runs every morning. It signs in to Google as a "service account", a robot account that you allow to edit only the Hydro Garden calendar.</p>
+    <p>This needs "Sync all devices" (below) to be connected, and one setup:</p>
+    <ol class="steps">
+      <li>In the <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener">Google Cloud console, Service accounts</a>, in the same project as before, press "Create service account". Name it "hydro-garden" and finish without adding roles.</li>
+      <li>Open the new account, go to Keys, "Add key", "Create new key", type JSON. A file downloads.</li>
+      <li>On GitHub open <a href="https://github.com/${esc(SITE_REPO)}/settings/secrets/actions/new" target="_blank" rel="noopener">${esc(SITE_REPO)}, Settings, Secrets and variables, Actions, New repository secret</a>. Name: <code>GOOGLE_SERVICE_ACCOUNT</code>. Value: the whole content of the downloaded file. Then delete the file.</li>
+      <li>In Google Calendar on the web, open the settings of the "Hydro Garden" calendar, "Share with specific people", and add the service account's address (it ends in <code>.iam.gserviceaccount.com</code>) with "Make changes to events".</li>
+      <li>Change anything in the app, or start the job by hand under <a href="https://github.com/${esc(SITE_REPO)}/actions/workflows/calendar.yml" target="_blank" rel="noopener">Actions, Update Google Calendar, Run workflow</a>. After about a minute this box turns green.</li>
+    </ol>
+    ${state.settings.gcalCalendarId ? '' : '<p class="warn">The Hydro Garden calendar does not exist yet. Press "Sync with Google Calendar" on the Plan page once first, so there is a calendar to share in step 4.</p>'}
+    <p class="note">The secret is stored encrypted by GitHub and is not readable in the public repository. The service account can only touch calendars you share with it.</p>
   </section>
   <section class="card" id="ghsync"><h2>Sync all devices</h2>
     <p>Every change is saved to GitHub within a couple of seconds, and every connected device loads the newest version when you open it. Slots, dates, ticked tasks and all settings are included.</p>
@@ -491,6 +510,7 @@ const actions = {
   'gcal-sync'() { runCalSync(false); },
   async share() { const url = `${location.origin}${location.pathname}#/import/${encode(state)}`; try { await navigator.clipboard.writeText(url); ui.msg = 'Transfer link copied. Open it on the other device.'; } catch { prompt('Copy this link and open it on the other device:', url); } render(); },
   'gh-now'() { syncNow(); },
+  'open-auto'() { setTimeout(() => document.getElementById('gcal-auto')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80); },
   'open-sync'() { ui.sheet = null; location.hash = '#/settings'; setTimeout(() => document.getElementById('ghsync')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60); },
   'gh-off'() { if (confirm('Stop syncing on this device? The garden stays here as a local copy.')) { gh.cfg = { token: '', sha: null, repo: '' }; saveCfg(gh.cfg); gh.error = ''; render(); } },
   async 'copy-connect'() { try { await navigator.clipboard.writeText(connectLink()); ui.msg = 'Connection link copied.'; } catch { prompt('Copy this link and open it on the other device:', connectLink()); } render(); },

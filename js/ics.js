@@ -1,4 +1,4 @@
-// iCalendar export: one event per open task, plus a repeating water-level check.
+// iCalendar export. Calendar entries are built only from open tasks in the plan, one per day and colour.
 import { addDays } from './util.js';
 
 const fold = line => line.match(/.{1,70}/gu).join('\r\n ');
@@ -21,10 +21,6 @@ export function calendarItems(schedule, state, today, catLabels) {
     if (ts.length > 1) { title = `${catLabels[ts[0].cat].label}: ${ts.map(t => t.title).join(' / ')}`; if (title.length > 110) title = `${title.slice(0, 107)}...`; }
     return { key: k, date: ts[0].date, time, cat: ts[0].cat, title: `Garden: ${title}`, body: ts.map(t => `${t.title}\n${t.detail}`).join('\n\n') };
   });
-  if (schedule.tank && state.settings.topUpDays > 0) {
-    const start = schedule.tank.firstSow > today ? schedule.tank.firstSow : today;
-    items.push({ key: 'tank:topup', date: start, time, cat: 'water', every: state.settings.topUpDays, until: addDays(today, 140), title: 'Garden: check the water level', body: 'Look at the fill indicator. Top up when it is near the MIN mark, with fertilizer mixed into the jug at the current strength.' });
-  }
   return items;
 }
 
