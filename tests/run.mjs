@@ -49,6 +49,14 @@ assert.ok(!ics.includes('RRULE') && ics.split('BEGIN:VEVENT').length - 1 === ite
 for (const line of ics.split('\r\n')) assert.ok([...line].length <= 75, line);
 console.log(items.length, 'calendar items');
 console.log(sch.tasks.slice(0, 60).map(t => `${t.date} ${t.cat.padEnd(7)} ${t.title}`).join('\n'));
+// sprout checks repeat every 2 days until recorded, and missed ones do not pile up
+{ const cid = `C1:${today}:sprout:`;
+  const c0 = sch.tasks.filter(t => t.id.startsWith(cid)).map(t => t.date);
+  assert.ok(c0.length >= 5 && diffDays(c0[1], c0[0]) === 2, 'repeating checks');
+  const later = addDays(today, 12), sl = buildSchedule(state, pm, later).tasks.filter(t => t.id.startsWith(cid));
+  assert.equal(sl.filter(t => t.date <= later).length, 1, 'only the latest past check stays');
+  const st4 = structuredClone(state); st4.slots.C1.sprouted = addDays(today, 8);
+  assert.equal(buildSchedule(st4, pm, today).tasks.filter(t => t.id.startsWith(cid)).length, 0, 'recording sprouts ends the checks'); }
 console.log('ALL TESTS PASSED');
 
 // --- Google Calendar sync against a fake API

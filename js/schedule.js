@@ -85,8 +85,18 @@ export function buildSchedule(state, plants, today) {
       add({ id: `${key}:sow`, date: S, cat: 'sow', slot: id, title: `${plug ? 'Sow' : 'Plant'} ${tag}`, detail: how });
     }
     if (plug && !slot.sprouted) {
-      add({ id: `${key}:sprout`, date: m.sproutFrom, cat: 'care', slot: id, observe: 'sprouted', title: `Sprouts expected from today: ${tag}`, detail: `Check daily until about ${p.germ[1]} days after sowing. Take the lid off for good as soon as green shows, then record the date.` });
-      add({ id: `${key}:noshow`, date: addDays(m.sproutBy, 7), cat: 'sow', slot: id, title: `Nothing up yet? Re-sow ${tag}`, detail: 'Use a fresh plug. Check that the plug touches the water and that the seeds sit at the right depth.' });
+      // A check every 2 days until sprouts are recorded. Missed checks do not pile up: only the latest past one stays.
+      const noShow = addDays(m.sproutBy, 7), checks = [];
+      for (let d = m.sproutFrom; d < noShow; d = addDays(d, 2)) checks.push(d);
+      const past = checks.filter(d => d <= today), keep = new Set([...checks.filter(d => d > today), past[past.length - 1]].filter(Boolean));
+      for (const d of checks) {
+        if (!keep.has(d)) continue;
+        const first = d === m.sproutFrom, late = d > m.sproutBy, day = diffDays(d, S);
+        add({ id: `${key}:sprout:${d}`, date: d, cat: 'care', slot: id, observe: 'sprouted',
+          title: first ? `Sprouts expected from today: ${tag}` : `Check for sprouts again: ${tag}`,
+          detail: `Lift the lid and look (day ${day} since sowing). Green showing? Press "Yes, I saw it today" and take the lid off for good. Nothing yet? Tick this off: the next check comes in 2 days.${late ? ` This is later than the usual ${p.germ[1]} days, so also check that the plug touches the water and the tray is not too warm.` : ` Usually up by day ${p.germ[1]}.`}` });
+      }
+      add({ id: `${key}:noshow`, date: noShow, cat: 'sow', slot: id, title: `Nothing up yet? Re-sow ${tag}`, detail: 'Use a fresh plug. Check that the plug touches the water and that the seeds sit at the right depth.' });
     }
     if (plug && !slot.saucer && diffDays(S, firstSow) > 21 && S >= lowerDate) {
       warnings.push(`${tag} is sown into a tank that is already kept low. Start the plug in a saucer of water instead, or drip water on it daily until its roots reach the water.`);
